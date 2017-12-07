@@ -24,6 +24,7 @@ import csv
 from threading import RLock
 import threading
 from joblib import Parallel, delayed
+from gensim.models.keyedvectors import KeyedVectors
 
 
 def startswith(trie, prefix, exclude=[]):
@@ -259,13 +260,13 @@ def word_in_topn_approx(w1, w2, w3, w4, rule, n, idx_annoy):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('embeddings', type=str)
+    # parser.add_argument('embeddings', type=str)
     parser.add_argument('--run', type=str, default='run')
     
     args = parser.parse_args()
     
     #Load the model
-    model = word2vec.Word2Vec.load(args.embeddings)
+    model =  KeyedVectors.load_word2vec_format('~/models/GoogleNews-vectors-negative300.bin', binary=True)
     
     #Vocabulary
     V = [ v for v in model.vocab.keys() if not v.startswith("DBPEDIA") ]#[:1000]
@@ -388,7 +389,7 @@ if __name__ == "__main__":
         print "Building similarity search index..."
         for i, vec in enumerate(model.syn0norm):
             idx_annoy.add_item(i, list(vec))
-        idx_annoy.build(500)
+        idx_annoy.build(300)
         idx_annoy.save(idx_file)
     print "Done."
 

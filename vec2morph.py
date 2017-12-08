@@ -25,6 +25,10 @@ from threading import RLock
 import threading
 from joblib import Parallel, delayed
 from gensim.models.keyedvectors import KeyedVectors
+import logging
+
+FORMAT = '%(asctime)-15s %(message)s'
+logging.basicConfig(format=FORMAT, level=logging.INFO, filename='vec2morph.log')
 
 
 def startswith(trie, prefix, exclude=[]):
@@ -272,24 +276,24 @@ if __name__ == "__main__":
     V = [ v for v in model.vocab.keys() if not v.startswith("DBPEDIA") ]#[:1000]
     V_lookup = dict(enumerate(V))
     V = map(unicode, V)
-    
-    print "Loaded vocab of size ", len(V)
-    
-    print "Building forward trie"
+
+    logging.info("Loaded vocab of size %s", len(V))
+
+    logging.info("Building forward trie")
     
     #Build a trie
     voc_trie = dawg.CompletionDAWG(V)
     
-    print "Building backward trie"
+    logging.info("Building backward trie")
     voc_trie_rev = dawg.CompletionDAWG(map(lambda v: v[::-1], V))
     
-    print "Done."
+    logging.info("Done.")
     
     if not os.path.exists(args.run):
       os.mkdir(args.run)
-      print "Creating run " + args.run
+      logging.info("Creating run %s" + args.run)
  
-    print "Creating Voc lookup"
+    logging.info("Creating Voc lookup")
     (voc_lookup, voc_lookup_rev) = ({}, {})
     if os.path.exists(args.run + '/voc_lookup.dat'):
         (voc_lookup, voc_lookup_rev) = marshal.load(open(args.run + '/voc_lookup.dat', 'rb'))
@@ -297,9 +301,9 @@ if __name__ == "__main__":
         for w in V:
             voc_lookup[w] = len(voc_lookup)
             voc_lookup_rev[voc_lookup[w]] = w
-        print "Lookup size:", len(voc_lookup)
+        logging.info("Lookup size: %s", len(voc_lookup))
         marshal.dump((voc_lookup, voc_lookup_rev), open(args.run + '/voc_lookup.dat', 'wb'))
-    print "Done."
+    logging.info("Done.")
     
     def pair_to_int(w1, w2):
         return voc_lookup[w1] * len(voc_lookup) + voc_lookup[w2]
@@ -309,7 +313,7 @@ if __name__ == "__main__":
         w1i = (pairid - w2i) / len(voc_lookup)
         return (voc_lookup_rev[w1i], voc_lookup_rev[w2i])
     
-    print "Extracting suffixes and prefixes"
+    logging.info("Extracting suffixes and prefixes")
     lookup = {}
     if os.path.exists(args.run + '/lookup.dat'):
         lookup = marshal.load(open(args.run + '/lookup.dat', 'rb'))
@@ -324,26 +328,26 @@ if __name__ == "__main__":
                     lookup[suf] = len(lookup)
                 if pre not in lookup:
                     lookup[pre] = len(lookup)
-        print "Lookup size:", len(lookup)
+        logging.info("Lookup size: %s", len(lookup))
         marshal.dump(lookup, open(args.run + '/lookup.dat', 'wb'))
-    print "Done."
+    logging.info("Done.")
     lookup_rev = dict([ (v,k) for (k,v) in lookup.iteritems() ])
     
     def extract_rules(ws):
         return rules_only(ws, voc_trie, voc_trie_rev, lookup)
     pool = multiprocessing.Pool(processes=22)
     
-    print "Extracting candidates"
+    logging.info("Extracting candidates")
     #Extract candidate rules
     all_rules={}
     if os.path.exists(args.run + '/rules.dat'):
         all_rules = marshal.load(open(args.run + '/rules.dat', 'rb'))
     else:
         all_rules = merge_rule_counts(pool.map(extract_rules, list(chunks(V, 20000))))
-        print "Extracted %d rules." % len(all_rules)
+        logging.info("Extracted %d rules. %s", len(all_rules))
         marshal.dump(all_rules, open(args.run + '/rules.dat', 'wb'))
     
-    print "Gathering support pairs"
+    logging.info( "Gathering support pairs")
     
     def extract_support(ws):
       return support(ws, voc_trie, voc_trie_rev, lookup, all_rules)
@@ -355,23 +359,23 @@ if __name__ == "__main__":
         all_rules_with_support = merge_support(pool_support.map(extract_support, list(chunks(V, 20000))))
         marshal.dump(all_rules_with_support, open(args.run + '/support.dat', 'wb'))
 
-    print "Top 10 rules:"
+    logging.info("Top 10 rules:")
     rs=sorted(all_rules.items(), key= lambda (k,v): -v)
     for (r, c) in rs[:10]:
-        print int_to_rule(r, lookup, lookup_rev), c
+        logging.info(int_to_rule(r, lookup, lookup_rev), c)
 
-    print "Bottom 10 rules:"
+    logging.info("Bottom 10 rules:")
     for (r, c) in rs[-10:]:
-        print int_to_rule(r, lookup, lookup_rev), c
+        logging.info(int_to_rule(r, lookup, lookup_rev), c)
 
-    print "Rules with c>1000:", len(filter(lambda r: r[1] >= 1000, rs))
-    print "Rules with c>500:",  len(filter(lambda r: r[1] >= 500, rs))
-    print "Rules with c>100:",  len(filter(lambda r: r[1] >= 100, rs))
+    logging.info("Rules with c>1000: %s", len(filter(lambda r: r[1] >= 1000, rs)))
+    logging.info("Rules with c>500: %s",  len(filter(lambda r: r[1] >= 500, rs)))
+    logging.info("Rules with c>100: %s",  len(filter(lambda r: r[1] >= 100, rs)))
 
     restricted_rule_set = map(lambda r: r[0], filter(lambda r: r[1] >= 500, rs))
     restricted_rules_with_support = dict(filter(lambda p: p[0] in restricted_rule_set, all_rules_with_support.iteritems()))
 
-    print "Extracting morphological transformations"
+    logging.info("Extracting morphological transformations")
  
     
     
@@ -383,15 +387,15 @@ if __name__ == "__main__":
     idx_annoy = annoy.AnnoyIndex(num_features, metric='angular')
     idx_file = args.run + '/annoy.idx'
     if os.path.exists(idx_file):
-        print "Loading similarity search index..."
+        logging.info("Loading similarity search index...")
         idx_annoy.load(idx_file)
     else:
-        print "Building similarity search index..."
+        logging.info("Building similarity search index...")
         for i, vec in enumerate(model.syn0norm):
             idx_annoy.add_item(i, list(vec))
         idx_annoy.build(300)
         idx_annoy.save(idx_file)
-    print "Done."
+    logging.info("Done.")
 
     def extract_transforms_approx(p):
         return extract_transforms(p[0], p[1], idx_annoy)
